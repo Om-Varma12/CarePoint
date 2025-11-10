@@ -7,7 +7,7 @@ import { ChatInterface } from "@/components/chat-interface"
 import type { Message } from "@/types/chat"
 import { getUserFromCookie } from "@/lib/auth-utils"
 import { useConversations } from "@/hooks/useConversations"
-import { ensureConversationExists, saveUserMessage, handleAIResponse } from "@/lib/messageHandler"
+import { ensureConversationExists, saveUserMessage } from "@/lib/messageHandler"
 
 export default function Home() {
   const router = useRouter()
@@ -97,11 +97,6 @@ export default function Home() {
     }
   }
 
-  const addBotMessageToChat = (chatId: string, botMessage: Message) => {
-    console.log('✅ Adding bot message to chat:', chatId)
-    addMessageToChat(chatId, botMessage)
-  }
-
   // MAIN MESSAGE HANDLER
   const handleSendMessage = async (content: string) => {
     console.log('\n🚀 ===== STARTING MESSAGE SEND =====')
@@ -162,12 +157,70 @@ export default function Home() {
 
       console.log('\n📌 STEP 6: Getting AI response from backend')
       
-      setTimeout(() => {
-        handleAIResponse({
-          chatId: activeChatId,
-          removeLoadingMessage,
-          addBotMessage: addBotMessageToChat,
-        })
+      // Call AI endpoint directly here instead of using external function
+      setTimeout(async () => {
+        const chatIdForBot = activeChatId
+        console.log('🤖 Requesting AI response for chat:', chatIdForBot)
+        
+        try {
+          const aiResponse = await fetch('http://localhost:5000/getAIResponse', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              conversation_hash: chatIdForBot
+            })
+          })
+          
+          const aiData = await aiResponse.json()
+          console.log('📥 AI Response received:', aiData)
+          
+          // Remove loading message
+          console.log('🗑️ Removing loading message')
+          removeLoadingMessage(chatIdForBot)
+          
+          if (!aiData.success) {
+            console.error('❌ Failed to get AI response:', aiData.error)
+            
+            const errorMessage: Message = {
+              id: Date.now().toString(),
+              role: "bot",
+              content: "I'm having trouble connecting to the AI. Please try again.",
+              timestamp: new Date(),
+            }
+            addMessageToChat(chatIdForBot, errorMessage)
+            return
+          }
+          
+          // Create and add bot message with AI response
+          const botMessage: Message = {
+            id: Date.now().toString(),
+            role: "bot",
+            content: aiData.response,
+            timestamp: new Date(),
+          }
+
+          console.log('📌 Adding AI bot message to UI:', aiData.response.substring(0, 100))
+          addMessageToChat(chatIdForBot, botMessage)
+          console.log('✅ AI bot message added to chat!')
+          
+        } catch (error) {
+          console.error('❌ Error getting AI response:', error)
+          
+          // Remove loading message
+          removeLoadingMessage(chatIdForBot)
+          
+          const errorMessage: Message = {
+            id: Date.now().toString(),
+            role: "bot",
+            content: "I apologize, but I'm experiencing technical difficulties. Please try again.",
+            timestamp: new Date(),
+          }
+          addMessageToChat(chatIdForBot, errorMessage)
+        }
+        
+        console.log('🏁 ===== COMPLETE =====\n')
       }, 500)
 
     } catch (error) {

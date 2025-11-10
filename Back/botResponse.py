@@ -6,7 +6,7 @@ from openai import OpenAI
 # Initialize OpenAI client with Hugging Face router
 client = OpenAI(
     base_url="https://router.huggingface.co/v1",
-    api_key="Your_Hugging_Face_API_Key"  # Replace with your actual Hugging Face API key
+    api_key="api_key_here"  # Replace with your actual Hugging Face API key
 )
 
 def get_bot_response(conversation_history: List[Dict[str, str]]) -> str:
