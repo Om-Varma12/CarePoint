@@ -5,11 +5,12 @@ import type React from "react";
 import { useState, useRef, useEffect } from "react";
 import type { Chat } from "@/types/chat";
 import { Button } from "@/components/ui/button";
-import { Menu, Settings, Send, User } from "lucide-react";
+import { Menu, Settings, Send, User, HelpCircle } from "lucide-react";
 import { WelcomeScreen } from "@/components/welcome-screen";
 import { MessageList } from "@/components/message-list";
 import { DisclaimerNotice } from "@/components/disclaimer-notice";
 import { SettingsModal } from "@/components/settings-model";
+import { FAQModal } from "@/components/faq-modal";
 import { cn } from "@/lib/utils";
 import { saveUserToCookie, getUserFromCookie, removeUserFromCookie } from "@/lib/auth-utils";
 
@@ -32,6 +33,7 @@ export function ChatInterface({
   const [showDisclaimer, setShowDisclaimer] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showFAQModal, setShowFAQModal] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -50,7 +52,7 @@ export function ChatInterface({
       setUserName(savedUser.userName);
       setUserId(savedUser.userId);
       onUserIdChange(savedUser.userId);
-      console.log('🔄 User restored from cookie:', savedUser.userName, 'ID:', savedUser.userId);
+      console.log('📄 User restored from cookie:', savedUser.userName, 'ID:', savedUser.userId);
     }
   }, [onUserIdChange]);
 
@@ -90,6 +92,16 @@ export function ChatInterface({
   };
 
   const handleSuggestedQuestion = (question: string) => {
+    if (!userId) {
+      alert("Please login to start chatting");
+      setShowAuthModal(true);
+      return;
+    }
+    onSendMessage(question);
+    setShowDisclaimer(true);
+  };
+
+  const handleFAQSelect = (question: string) => {
     if (!userId) {
       alert("Please login to start chatting");
       setShowAuthModal(true);
@@ -250,8 +262,18 @@ export function ChatInterface({
               <Button 
                 variant="ghost" 
                 size="icon" 
+                onClick={() => setShowFAQModal(true)}
+                title="Healthcare FAQs"
+                className="cursor-pointer"
+              >
+                <HelpCircle className="w-5 h-5" />
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="icon" 
                 onClick={() => setShowSettingsModal(true)}
                 title="Settings"
+                className="cursor-pointer"
               >
                 <Settings className="w-5 h-5" />
               </Button>
@@ -268,6 +290,14 @@ export function ChatInterface({
               >
                 <User className="w-4 h-4 mr-2" />
                 Login / Sign Up
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="icon"
+                onClick={() => setShowFAQModal(true)}
+                title="Healthcare FAQs"
+              >
+                <HelpCircle className="w-5 h-5" />
               </Button>
               <Button 
                 variant="ghost" 
@@ -341,6 +371,13 @@ export function ChatInterface({
           </form>
         </div>
       </div>
+
+      {/* FAQ Modal */}
+      <FAQModal
+        isOpen={showFAQModal}
+        onClose={() => setShowFAQModal(false)}
+        onSelectFAQ={handleFAQSelect}
+      />
 
       {/* Settings Modal */}
       <SettingsModal

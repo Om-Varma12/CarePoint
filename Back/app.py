@@ -12,17 +12,24 @@ from conversations import (
 from botResponse import get_bot_response
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for React frontend
+
+# Configure CORS properly
+CORS(app, resources={
+    r"/*": {
+        "origins": ["http://localhost:3000", "http://127.0.0.1:3000"],
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type"],
+        "supports_credentials": True
+    }
+})
 
 # ==================== USER AUTHENTICATION ENDPOINTS ====================
 
-@app.route('/loginUser', methods=['POST'])
+@app.route('/loginUser', methods=['POST', 'OPTIONS'])
 def login():
-    """
-    Handle user login requests
-    Expects JSON: { "email": "user@example.com", "password": "password123" }
-    Returns JSON: { "name": "John Doe", "user_id": 123 } or { "error": "error message" }
-    """
+    if request.method == 'OPTIONS':
+        return '', 200
+        
     try:
         data = request.get_json()
         
@@ -50,13 +57,11 @@ def login():
         return jsonify({"error": "Internal server error"}), 500
 
 
-@app.route('/signupUser', methods=['POST'])
+@app.route('/signupUser', methods=['POST', 'OPTIONS'])
 def signup():
-    """
-    Handle user signup requests
-    Expects JSON: { "name": "John Doe", "email": "user@example.com", "password": "password123" }
-    Returns JSON: { "name": "John Doe", "user_id": 123 } or { "error": "error message" }
-    """
+    if request.method == 'OPTIONS':
+        return '', 200
+        
     try:
         data = request.get_json()
         
@@ -87,17 +92,11 @@ def signup():
 
 # ==================== CONVERSATION ENDPOINTS ====================
 
-@app.route('/createConversation', methods=['POST'])
+@app.route('/createConversation', methods=['POST', 'OPTIONS'])
 def create_new_conversation():
-    """
-    Create a new conversation
-    Expects JSON: {
-        "conversation_hash": "abc123xyz",
-        "user_id": 1,
-        "title": "First message from user"
-    }
-    Returns JSON: { "success": true, "conversation_id": "abc123xyz" }
-    """
+    if request.method == 'OPTIONS':
+        return '', 200
+        
     try:
         data = request.get_json()
         
@@ -123,17 +122,11 @@ def create_new_conversation():
         return jsonify({"error": "Internal server error"}), 500
 
 
-@app.route('/addMessage', methods=['POST'])
+@app.route('/addMessage', methods=['POST', 'OPTIONS'])
 def add_new_message():
-    """
-    Add a message to a conversation
-    Expects JSON: {
-        "conversation_hash": "abc123xyz",
-        "sender": "user",  // or "bot"
-        "message": "Hello, I need help"
-    }
-    Returns JSON: { "success": true }
-    """
+    if request.method == 'OPTIONS':
+        return '', 200
+        
     try:
         data = request.get_json()
         
@@ -159,15 +152,11 @@ def add_new_message():
         return jsonify({"error": "Internal server error"}), 500
 
 
-@app.route('/getAIResponse', methods=['POST'])
+@app.route('/getAIResponse', methods=['POST', 'OPTIONS'])
 def get_ai_response():
-    """
-    Get AI bot response for a conversation
-    Expects JSON: {
-        "conversation_hash": "abc123xyz"
-    }
-    Returns JSON: { "success": true, "response": "AI generated response" }
-    """
+    if request.method == 'OPTIONS':
+        return '', 200
+        
     try:
         data = request.get_json()
         
@@ -193,8 +182,12 @@ def get_ai_response():
         
         # Get AI response
         try:
-            ai_response = get_bot_response(conversation_history)
+            ai_result = get_bot_response(conversation_history)
+            ai_response = ai_result['response']
+            medicines = ai_result['medicines']
+            
             print(f"✅ AI Response generated: {ai_response[:100]}...")
+            print(f"💊 Medicines found: {len(medicines)}")
             
             # Save bot response to database
             save_result = add_message(conversation_hash, 'bot', ai_response)
@@ -202,9 +195,16 @@ def get_ai_response():
             if not save_result['success']:
                 print(f"⚠️ Warning: Failed to save bot message to DB")
             
+            # Save medicine recommendations as separate bot messages
+            for medicine in medicines:
+                med_save_result = add_message(conversation_hash, 'bot', medicine)
+                if not med_save_result['success']:
+                    print(f"⚠️ Warning: Failed to save medicine recommendation to DB")
+            
             return jsonify({
                 "success": True,
-                "response": ai_response
+                "response": ai_response,
+                "medicines": medicines
             }), 200
             
         except Exception as ai_error:
@@ -218,13 +218,11 @@ def get_ai_response():
         return jsonify({"error": "Internal server error"}), 500
 
 
-@app.route('/getConversation/<conversation_hash>', methods=['GET'])
+@app.route('/getConversation/<conversation_hash>', methods=['GET', 'OPTIONS'])
 def get_conversation(conversation_hash):
-    """
-    Get all messages for a specific conversation
-    Optional query param: user_id
-    Returns JSON: { "success": true, "messages": [...] }
-    """
+    if request.method == 'OPTIONS':
+        return '', 200
+        
     try:
         user_id = request.args.get('user_id', type=int)
         
@@ -240,12 +238,11 @@ def get_conversation(conversation_hash):
         return jsonify({"error": "Internal server error"}), 500
 
 
-@app.route('/getUserConversations/<int:user_id>', methods=['GET'])
+@app.route('/getUserConversations/<int:user_id>', methods=['GET', 'OPTIONS'])
 def get_user_convos(user_id):
-    """
-    Get all conversations for a specific user
-    Returns JSON: { "success": true, "conversations": [...] }
-    """
+    if request.method == 'OPTIONS':
+        return '', 200
+        
     try:
         result = get_user_conversations(user_id)
         
@@ -259,16 +256,11 @@ def get_user_convos(user_id):
         return jsonify({"error": "Internal server error"}), 500
 
 
-@app.route('/updateConversationTitle', methods=['PUT'])
+@app.route('/updateConversationTitle', methods=['PUT', 'OPTIONS'])
 def update_title():
-    """
-    Update conversation title
-    Expects JSON: {
-        "conversation_hash": "abc123xyz",
-        "title": "New title"
-    }
-    Returns JSON: { "success": true }
-    """
+    if request.method == 'OPTIONS':
+        return '', 200
+        
     try:
         data = request.get_json()
         
@@ -293,13 +285,11 @@ def update_title():
         return jsonify({"error": "Internal server error"}), 500
 
 
-@app.route('/endConversation', methods=['PUT'])
+@app.route('/endConversation', methods=['PUT', 'OPTIONS'])
 def end_convo():
-    """
-    Mark a conversation as ended
-    Expects JSON: { "conversation_hash": "abc123xyz" }
-    Returns JSON: { "success": true }
-    """
+    if request.method == 'OPTIONS':
+        return '', 200
+        
     try:
         data = request.get_json()
         
@@ -332,4 +322,7 @@ def health_check():
 
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    print("\n" + "="*60)
+    print("🏥 CarePoint Backend Server Starting...")
+    print("="*60 + "\n")
+    app.run(debug=True, host='0.0.0.0', port=5000, use_reloader=True)

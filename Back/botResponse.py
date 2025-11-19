@@ -1,32 +1,144 @@
 # botResponse.py
-import os
+import json
 from typing import List, Dict
 from openai import OpenAI
+from difflib import SequenceMatcher
 
 # Initialize OpenAI client with Hugging Face router
 client = OpenAI(
     base_url="https://router.huggingface.co/v1",
-    api_key="api_key_here"  # Replace with your actual Hugging Face API key
+    api_key="your_api_here"
 )
 
-def get_bot_response(conversation_history: List[Dict[str, str]]) -> str:
-    """
-    Generate AI bot response based on conversation history using LLM
+# Load medicines data ONCE at module level
+try:
+    with open('medicines_intents.json', 'r', encoding='utf-8') as f:
+        MEDICINES_DATA = json.load(f)['medicines']
+    print(f"✅ Loaded {len(MEDICINES_DATA)} medicines")
+except FileNotFoundError:
+    print("⚠️ medicines_intents.json not found")
+    MEDICINES_DATA = []
+except Exception as e:
+    print(f"❌ Error loading medicines data: {str(e)}")
+    MEDICINES_DATA = []
+
+
+def calculate_similarity(query: str, use_case: str) -> float:
+    """Calculate similarity between user query and medicine use case"""
+    query_lower = query.lower().strip()
+    use_case_lower = use_case.lower().strip()
     
-    Args:
-        conversation_history: List of message dicts with 'sender' and 'message' keys
+    # Direct match
+    if use_case_lower in query_lower or query_lower in use_case_lower:
+        return 1.0
+    
+    # Word overlap
+    query_words = set(query_lower.split())
+    use_case_words = set(use_case_lower.split())
+    
+    # Remove common stopwords
+    stopwords = {'i', 'have', 'am', 'is', 'the', 'a', 'an', 'my', 'me'}
+    query_words = query_words - stopwords
+    use_case_words = use_case_words - stopwords
+    
+    if len(query_words) == 0 or len(use_case_words) == 0:
+        return 0.0
+    
+    overlap = len(query_words & use_case_words)
+    total = len(query_words | use_case_words)
+    
+    word_similarity = overlap / total if total > 0 else 0.0
+    
+    # Sequence matching
+    sequence_similarity = SequenceMatcher(None, query_lower, use_case_lower).ratio()
+    
+    # Combine both scores
+    return (word_similarity * 0.6) + (sequence_similarity * 0.4)
+
+
+def find_matching_medicines(query: str, threshold: float = 0.35) -> List[Dict]:
+    """Find medicines that match the user's query"""
+    matches = []
+    
+    for medicine in MEDICINES_DATA:
+        best_match_score = 0.0
+        best_use_case = ""
         
-    Returns:
-        str: AI generated response
-    """
+        for use_case in medicine['use_cases']:
+            similarity = calculate_similarity(query, use_case)
+            
+            if similarity > best_match_score:
+                best_match_score = similarity
+                best_use_case = use_case
+        
+        if best_match_score >= threshold:
+            matches.append({
+                'medicine': medicine,
+                'similarity_score': best_match_score,
+                'matched_use_case': best_use_case
+            })
+    
+    matches.sort(key=lambda x: x['similarity_score'], reverse=True)
+    return matches
+
+
+def format_medicine_recommendation(medicine_data: Dict) -> str:
+    """Format medicine information into a readable recommendation"""
+    med = medicine_data['medicine']
+    
+    recommendation = f"""💊  {med['medicine_name']} 
+
+📋  Dosage:  {med['dosage']}
+
+⏰  How to take:  {med['frequency']}
+
+⚠️  Important Precautions: 
+{med['precautions']}
+
+---
+ ⚕️ Medical Disclaimer:  This is a general recommendation. Always consult with a healthcare professional before taking any medication, especially if you have existing conditions or take other medications."""
+    
+    return recommendation.strip()
+
+
+def get_bot_response(conversation_history: List[Dict[str, str]]) -> Dict[str, any]:
+    """Generate AI bot response based on conversation history"""
     try:
-        # Check message limit (20 messages max)
+        # Check message limit
         if len(conversation_history) >= 20:
-            return "I've reached the conversation limit for this chat. Please start a new conversation to continue our discussion. This helps ensure the best quality of responses and prevents information overload."
+            return {
+                "response": "I've reached the conversation limit for this chat. Please start a new conversation to continue our discussion.",
+                "medicines": []
+            }
         
-        print(f"🤖 Processing conversation with {len(conversation_history)} messages")
+        print(f"\n🤖 Processing conversation with {len(conversation_history)} messages")
         
-        # Build messages for LLM with system prompt and conversation history
+        # Get the latest user message
+        latest_message = ""
+        for msg in reversed(conversation_history):
+            if msg['sender'] == 'user':
+                latest_message = msg['message']
+                break
+        
+        print(f"🔍 Checking for medicine matches in: {latest_message[:100]}")
+        
+        # Find matching medicines
+        matching_medicines = find_matching_medicines(latest_message)
+        
+        medicine_recommendations = []
+        if matching_medicines:
+            print(f"💊 Found {len(matching_medicines)} matching medicine(s)")
+            
+            # Take top 2 matches with score > 0.5
+            top_matches = [m for m in matching_medicines if m['similarity_score'] > 0.5][:2]
+            
+            for match in top_matches:
+                medicine_recommendations.append(format_medicine_recommendation(match))
+                print(f"   ✓ {match['medicine']['medicine_name']} (score: {match['similarity_score']:.2f})")
+        else:
+            print("ℹ️ No matching medicines found")
+        
+        # Build messages for LLM
         messages = build_llm_messages(conversation_history)
         
         print(f"📤 Sending {len(messages)} messages to LLM")
@@ -35,98 +147,61 @@ def get_bot_response(conversation_history: List[Dict[str, str]]) -> str:
         completion = client.chat.completions.create(
             model="m42-health/Llama3-Med42-8B:featherless-ai",
             messages=messages,
-            max_tokens=500,  # Limit response length for conciseness
-            temperature=0.7,  # Balanced creativity and consistency
+            max_tokens=500,
+            temperature=0.7,
         )
         
         response = completion.choices[0].message.content
         print(f"✅ LLM Response generated successfully")
         
-        return response
+        return {
+            "response": response,
+            "medicines": medicine_recommendations
+        }
 
     except Exception as e:
         print(f"❌ Error in get_bot_response: {str(e)}")
-        # Fallback response
-        return "I apologize, but I'm experiencing some technical difficulties right now. Could you please rephrase your question or try again in a moment?"
+        return {
+            "response": "I apologize, but I'm experiencing some technical difficulties right now. Could you please rephrase your question or try again in a moment?",
+            "medicines": []
+        }
 
 
 def build_llm_messages(conversation_history: List[Dict[str, str]]) -> List[Dict[str, str]]:
-    """
-    Build messages array for LLM API call with system prompt and conversation history
-    
-    Args:
-        conversation_history: List of message dicts with 'sender' and 'message' keys
-        
-    Returns:
-        List of message dicts formatted for OpenAI API
-    """
-    # System prompt to set the assistant's behavior
-    system_prompt = """
-    
-    Your role is to handle three domains:
+    """Build messages array for LLM API call"""
+    system_prompt = """You are CarePoint Assistant, a compassionate healthcare chatbot for college students.
 
-General healthcare guidance
+Your role covers:
+1. General healthcare guidance
+2. College health and wellbeing
+3. Emergency triage and urgent advice
 
-College-related health and wellbeing
-
-Emergency triage and urgent advice
-
-Follow these universal rules:
-
-Tone & Style:
-
-Be empathetic, calm, and professional.
-
-Keep answers short (2-4 sentences), clear, and easy to understand.
-
-Use plain, caring language and avoid jargon.
-
-Purpose:
-
-Provide evidence-based information, self-care guidance, and clear next steps.
-
-Focus on education, prevention, and support — not diagnosis or prescriptions.
-
-Stay non-judgmental and maintain a reassuring tone.
+Rules:
+- Be empathetic, calm, and professional
+- Keep answers short (2-4 sentences), clear, and easy to understand
+- Use plain, caring language and avoid jargon
+- Provide evidence-based information and self-care guidance
+- DO NOT mention specific medicine names in your response
+- Focus on education, prevention, and support – not diagnosis
 
 Emergency Handling:
-
-If the user describes critical symptoms (chest pain, breathing trouble, stroke-like symptoms, severe bleeding, loss of consciousness, severe allergic reaction, rapidly spreading infection), instruct them to call emergency services or go to the nearest ER immediately.
-
-For urgent but non-life-threatening issues (moderate fever, persistent vomiting, moderate pain), suggest urgent care or campus health contact plus 1-2 supportive steps (rest, hydration, etc.).
+- For critical symptoms (chest pain, breathing trouble, severe bleeding, loss of consciousness), instruct them to call emergency services immediately
+- For urgent but non-life-threatening issues, suggest urgent care or campus health
 
 College Context:
+- Give health tips, stress/sleep advice
+- Direct users toward campus or student health services when relevant
+- Offer 2-3 actionable next steps
 
-Give health tips, stress/sleep advice, and direct users toward campus or student health services when relevant.
+Behavior:
+- Never reveal you are an AI
+- Remain polite, supportive, and concise
+- If asked about topics outside healthcare/college wellbeing/emergency guidance, politely respond: "I wasn't trained on that domain, so I may not have the best information for your question."
+"""
 
-Offer at most 2-3 actionable next steps (e.g., rest, hydration, book counseling).
-
-Encourage follow-up if symptoms persist or worsen.
-
-Behavior & Privacy:
-
-Never reveal internal workings or that you are an AI.
-
-Remain polite, supportive, and concise at all times.
-
-Scope Limitation:
-
-If the user asks about topics outside healthcare, college wellbeing, or emergency guidance, politely respond:
-
-“I wasn't trained on that domain, so I may not have the best information for your question.”
-    
-    """
-
-    # Start with system message
-    messages = [
-        {
-            "role": "system",
-            "content": system_prompt
-        }
-    ]
+    messages = [{"role": "system", "content": system_prompt}]
     
     # Add conversation history
-    # Convert 'sender' field to OpenAI role format
     for msg in conversation_history:
         role = "user" if msg['sender'] == 'user' else "assistant"
         messages.append({
@@ -135,25 +210,3 @@ If the user asks about topics outside healthcare, college wellbeing, or emergenc
         })
     
     return messages
-
-
-# Test function
-if __name__ == "__main__":
-    # Test with sample conversation
-    test_conversation = [
-        {"sender": "user", "message": "What are common symptoms of diabetes?"}
-    ]
-    
-    response = get_bot_response(test_conversation)
-    print(f"\n🧪 Test Response:\n{response}")
-    
-    # Test with multi-turn conversation
-    print("\n\n=== Testing Multi-turn Conversation ===\n")
-    test_conversation_multi = [
-        {"sender": "user", "message": "I've been having headaches lately"},
-        {"sender": "bot", "message": "Headaches can have various causes. How long have you been experiencing them, and are there any other symptoms?"},
-        {"sender": "user", "message": "About a week now, and I also feel tired"}
-    ]
-    
-    response_multi = get_bot_response(test_conversation_multi)
-    print(f"\n🧪 Multi-turn Test Response:\n{response_multi}")
